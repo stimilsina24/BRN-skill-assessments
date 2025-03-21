@@ -1,0 +1,381 @@
+---
+title: "RNA-seq-analysis"
+author: Santosh
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: cerulean
+    toc: true
+    toc_float:
+      collapsed: true
+editor_options:
+  chunk_output_type: console
+---
+### Install and load libraries
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+```{r}
+#Install libraries
+#install.packages("BiocManager")
+#library(BiocManager)
+#BiocManager::install("DESeq2")
+#BiocManager::install("apeglm")
+#BiocManager::install("tidyverse") # includes ggplot2 and dplyr
+#BiocManager::install("EnhancedVolcano")
+#install.packages("plotly")
+#BiocManager::install("ComplexHeatmap") #alternative = pheatmap
+#BiocManager::install( "AnnotationDbi" )
+#install.packages("devtools")
+#install.packages("Rtools")
+#BiocManager::install("EnsDb.Hsapiens.v86")
+# BiocManager::install( "clusterProfiler" )
+# BiocManager::install( "enrichplot" )
+# BiocManager::install("DOSE")
+#BiocManager::install("ReactomePA", force = TRUE)
+#BiocManager::install("msigdbr", force = TRUE)
+#BiocManager::install("KEGGREST", force = TRUE)
+# BiocManager::install("BiocUpgrade") ## you may need this
+# BiocManager::install("GOSemSim", force = TRUE)
+# install.packages("remotes")
+#BiocManager::install("EnsDb.Hsapiens.v107")
+# devtools::install_github("GuangchuangYu/GOSemSim")
+#install.packages(c("ggraph", "ggnetwork")) #altering ggplots 
+#devtools::install_github("datapplab/pathview")
+#update.packages(c("lattice", "spatial"))
+#install.packages("igraph")
+#install_github("wjawaid/enrichR")
+#BiocManager::install("recount")
+# install.packages('DT')
+# BiocManager::install("msigdb")
+# BiocManager::install("ggpubr")
+# devtools::install_github("kassambara/ggpubr")
+# ggpub_packages <- c("lme4", "pbkrtest", "car", "rstatix")
+# BiocManager::install(ggpub_packages)
+# install.packages("aplot")
+
+
+```
+
+
+```{r}
+#Load libraries 
+library(DESeq2)
+library(tidyverse) # includes ggplot2 and dplyr
+library(AnnotationDbi)
+library(AnnotationHub)
+library(EnsDb.Hsapiens.v86)
+library(devtools)
+library(apeglm)
+library(EnhancedVolcano)
+library(ComplexHeatmap)
+library(DT)
+library(ggpubr)
+#library(cowplot)
+
+# For pathway analysis using enrichR
+library(enrichR)
+library(enrichplot) # for visualisations
+library(ggupset) # for visualisations
+library(ReactomePA)
+library(clusterProfiler)
+library(msigdbr)
+library(KEGGREST)
+library(httr2)
+library(DBI)
+library(GOSemSim)
+library(lattice)
+library(spatial)
+library(pathview)
+library(ggridges)
+library(ensembldb)
+library(msigdb)
+library(aplot)
+
+#set output directories
+# DE_results <- dir.create(paste0(getwd(), "/DESeq2"))
+#Pathway <- dir.create(paste0(getwd(), "/Pathway_analysis"))
+
+```
+
+### Import data and perform DESeq analysis
+```{r}
+#Load rse object from rds file and set factor levels
+rse <- readRDS("EwS.rds")
+
+rse@colData$condition # condition
+#assay(rse)#Preview the count data
+str(assay(rse)) # dimensions of count data
+
+#Relevel the conditions- ctrl and sh
+# levels(rse$condition)
+# nlevels(rse$condition)
+rse$condition <- factor(rse$condition) #Make condition into a factor
+relevel(rse$condition, ref = "shCTR") #Set ctrl as the reference level
+
+```
+
+```{r, fig.width=10, fig.height=5}
+#Import the counts results, create metadata, and  run DESeq#
+
+#Import Counts table and filter out low counts
+#colData(rse) # view metadata 
+counts <- assay(rse)
+# head(counts)
+counts <- counts[which(rowSums(counts) > 50),]
+DT::datatable(head(counts), class = 'cell-border stripe', options = list(autoWidth = TRUE)) 
+
+#Create DESeq dataset, run DESeq, create results
+dds <- DESeqDataSet(rse, design = ~condition)
+dds <- DESeq(dds)
+res <- results(dds)
+plotMA(res) #MA plot before
+lfc_res <- lfcShrink(dds = dds, res = res, type = "normal", coef = 2) #coef is the comparison of interest
+
+par(mfrow = c(1,2))
+DESeq2::plotMA(res, 
+  colLine = "red",  ylim= c(-8, 8), main = "Original")
+DESeq2::plotMA(lfc_res, 
+  colLine = "red",  ylim= c(-8, 8), main = "lfcShrink")
+```
+
+### Perform PCA plot and sample correlation heatmap
+```{r}
+#PCA plot#
+
+#Log transformation and PCA plot
+rld <- rlog(dds)
+plotPCA(rld, intgroup = "condition") + coord_fixed(ratio = 2)
+
+
+# Sample correlation matrix heatmap
+# Extract the matrix of transformed normalized counts from the vsd_data object using the assay() function and save as vsd_mat_data.
+rld_mat_data <- assay(rld)
+
+#Calculate the correlation values between samples and save to vsd_cor_data.
+rld_cor_data <- cor(rld_mat_data)
+
+my_colors <- c("blue", "white", "red") #Define colors for the heatmap
+Heatmap(rld_cor_data, name = "r coeff.", show_heatmap_legend = TRUE, top_annotation = HeatmapAnnotation(Condition = rse$condition))
+
+```
+
+###4. Annotate and save DEG results, create volcano plot 
+
+```{r}
+#Save DEG list, annotate genes to symbols#
+#Use the results from lfcShrink for all downstream analysis --lfc_res
+res_all <- as.data.frame(na.omit(lfc_res)) %>% distinct() 
+
+#save the original DGE list with ensembl ids only
+#write.csv(res_all, file = paste0(DE_results,"DEgenes-all_ensembl.csv"))
+
+#Remove version # from ensembl id then annotate list with gene symbols and save it 
+rownames(res_all) <- gsub("\\.\\d+$", "", rownames(res_all))
+
+res_all <- res_all %>%
+  mutate(symbol = mapIds(EnsDb.Hsapiens.v86, keys = rownames(res_all), keytype = "GENEID", column = "SYMBOL"))
+
+```
+
+```{r}
+#Volcano plot
+EnhancedVolcano( res_all, lab = res_all$symbol, 
+                 x = 'log2FoldChange', y = 'padj', xlab = "Log2FC", ylab = "-log10(padj)",
+                 xlim = c(-8, 8), title = "", # Centered title
+                subtitle = NULL,  # Remove the "EnhancedVolcano" subtitle
+                caption = NULL, 
+                 pCutoff = 0.01, FCcutoff = 2, pointSize = 2.0, titleLabSize = 16,
+                 labSize = 3.0,  legendPosition = "right", legendLabSize = 12, axisLabSize = 12) + labs(title = 'shEF1 vs shCtrl') + theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(color = "black"), axis.text.y = element_text(color = "black"))  # Remove the "total = ..." caption
+ 
+```
+
+### Filter significant genes, perform heatmap of top up and down DE genes
+
+```{r}
+#Filter DEG list and save results#
+#Filter DEG list, save results, extract top up and down list
+
+#Criteria for filtering genes
+idx = which( res_all$padj <= 0.01 & 
+             abs( res_all$log2FoldChange ) >= 2   & 
+             res_all$baseMean >= 20)
+
+#Filter the significant genes.. keep the ensembl IDs for counts filtering and heatmap
+res_sig <- res_all[idx,] %>% 
+  arrange(desc(log2FoldChange)) 
+
+DT::datatable(res_sig, class = 'cell-border stripe', options = list(autoWidth = TRUE)) %>%
+  DT::formatRound(columns = c(1,2,3,4), digits = 3) %>% # Round specific columns
+  DT::formatSignif(columns = c(5,6), digits = 3) # Use significant digits for other columns
+
+#write.csv(res_sig, file = paste0(DE_results,"DEgenes-sig.csv"))
+
+#Up and down gene list
+res_up <- res_sig %>%
+  filter(log2FoldChange > 2, padj < 0.01)%>% 
+  arrange(desc(log2FoldChange))
+res_dn <- res_sig %>%
+  filter(log2FoldChange < -2, padj < 0.01)%>% 
+  arrange(log2FoldChange)
+
+```
+
+```{r}
+#Extract top genes and perform heatmap#
+# Extract top 10 up and down genes
+top_genes <- rbind(res_dn[1:10,] , res_up[1:10,])
+DT::datatable(top_genes, class = 'cell-border stripe', options = list(autoWidth = TRUE)) %>%
+  DT::formatRound(columns = c(1,2,3,4), digits = 3) %>% # Round specific columns
+  DT::formatSignif(columns = c(5,6), digits = 3) # Use significant digits for other columns
+
+norm_counts <- counts(dds, normalized = TRUE) 
+rownames(norm_counts) <- gsub("\\.\\d+$", "", rownames(norm_counts))
+  
+#Extract normalized counts for the significant up and down genes
+norm_counts_sig <- norm_counts[rownames(top_genes),]
+
+#convert counts to z score table and add the sample names as column names
+counts.z <- t(apply(norm_counts_sig, 1, scale))
+colnames(counts.z) <- rse$condition
+
+#Perform heatmap of top 10 up and down genes
+Heatmap(counts.z, cluster_rows = T, cluster_columns = T, column_labels = colnames(counts.z),
+        name = "Z-score", row_labels = top_genes[rownames(counts.z),]$symbol)
+```
+
+### ORA and GSEA analysis using Clusterprofiler
+
+```{r}
+#Part 1- ORA analysis and visualization#
+#Extract up and down gene list then perform pathway analysis
+up_genes <- pull(res_up, symbol)
+dn_genes <- pull(res_dn, symbol)
+
+# Get the gene sets from msigdb and wrangle
+gene_sets <- msigdbr(species = "Homo sapiens", category = "C2", subcategory = "CP:KEGG")
+gene_sets <- gene_sets %>%
+  dplyr::select(gs_name, gene_symbol)
+
+
+#ORA analysis, up genes
+# Run over-representation analysis
+egmt_u <- enricher(gene = up_genes,
+                 TERM2GENE = gene_sets)
+edf_u <- as.data.frame(egmt_u)
+DT::datatable(edf_u, class = 'cell-border stripe', options = list(autoWidth = TRUE)) %>%
+  DT::formatRound(columns = c(4,5,6,7), digits = 3) %>% # Round specific columns
+  DT::formatSignif(columns = c(8,9,10), digits = 3) # Use significant digits for other columns
+#write.csv(edf_u, file = paste0(Pathway, "KEGG_up_enrichr.csv"))
+
+# Plot results with clusterProfiler and save as pdf 
+# pdf(file = paste0(Pathway, "dot_up.pdf"), height = 8, width = 8)
+dot_u <- enrichplot::dotplot(egmt_u)
+# print(dot_u)
+# dev.off()
+# 
+# pdf(file = paste0(Pathway, "bar_up.pdf"), height = 6, width = 8)
+bar_u <- barplot(egmt_u)
+# print(bar_u)
+# dev.off()
+
+print(dot_u)
+print(bar_u)
+
+#ORA analysis, down genes
+# Run over-representation analysis
+egmt_d <- enricher(gene = dn_genes,
+                 TERM2GENE = gene_sets)
+edf_d <- as.data.frame(egmt_d)
+datatable(edf_d, class = 'cell-border stripe', options = list(autoWidth = TRUE))
+#write.csv(edf_d, file = paste0(Pathway, "KEGG_down_enrichr.csv"))
+
+# Plot results with clusterProfiler and save results
+# pdf(file = paste0(Pathway, "dot_down.pdf"), height = 8, width = 8)
+dot_d <- enrichplot::dotplot(egmt_d)
+# print(dot_d)
+# dev.off()
+# 
+# pdf(file = paste0(Pathway, "bar_down.pdf"), height = 6, width = 8)
+bar_d <- barplot(egmt_d)
+# print(bar_d)
+# dev.off()
+
+print(dot_d)
+print(bar_d)
+```
+
+```{r}
+#Part 2- GSEA analysis and visualization#
+# Adding a score for GSEA
+res_sig2 <- res_sig %>%
+  arrange(padj) %>%
+  mutate(gsea_metric = -log10(padj) * sign(log2FoldChange))
+
+# Deal with inf
+res_sig2<- res_sig2 %>%
+  mutate(padj = case_when(padj == 0 ~ .Machine$double.xmin,
+                          TRUE ~ padj)) %>%
+  mutate(gsea_metric = -log10(padj) * sign(log2FoldChange))
+
+# Remove NAs and order by GSEA
+res_sig2<- res_sig2 %>%
+  filter(! is.na(gsea_metric)) %>%
+  arrange(desc(gsea_metric))
+View(res_sig2)
+
+# GSEA value histogram
+#hist(res_sig2$gsea_metric, breaks = 100)
+
+# Get the ranked GSEA vector
+ranks <- res_sig2 %>%
+  dplyr::select(symbol, gsea_metric) %>%
+  distinct(symbol, .keep_all = TRUE) %>%
+  deframe()
+
+# Run GSEA
+gseares <- GSEA(geneList = ranks, 
+                TERM2GENE = gene_sets)
+gsearesdf <- as.data.frame(gseares)
+DT::datatable(gsearesdf, class = 'cell-border stripe', options = list(autoWidth = TRUE)) %>%
+  DT::formatRound(columns = c(4,5), digits = 3) %>% # Round specific columns
+  DT::formatSignif(columns = c(6,7,8), digits = 3) # Use significant digits for other columns
+
+# Make summary plots
+enrichplot::dotplot(gseares)
+
+# Make GSEA plot for "KEGG_ECM_RECEPTOR_INTERACTION"
+gseaplot2(gseares, geneSetID = "KEGG_ECM_RECEPTOR_INTERACTION",
+         title = "KEGG_ECM_RECEPTOR_INTERACTION")
+
+# Make GSEA plot for "KEGG_FOCAL_ADHESION"
+gseaplot2(gseares, geneSetID = "KEGG_FOCAL_ADHESION",
+         title = "KEGG_FOCAL_ADHESION")
+
+# Make GSEA plot for "KEGG_HEMATOPOIETIC_CELL_LINEAGE"
+gseaplot2(gseares, geneSetID = "KEGG_HEMATOPOIETIC_CELL_LINEAGE",
+         title = "KEGG_HEMATOPOIETIC_CELL_LINEAGE")
+
+
+# Make GSEA plot for top and bottom results
+# -- Get top 4 over-expressed pathways
+top_pathways <- gsearesdf %>%
+  top_n(n = 4, wt = NES) %>%
+  pull(ID)
+
+# -- Make gseaplot for each and return as list
+top_pathway_plots <- lapply(top_pathways, function(pathway) {
+  gseaplot(gseares, geneSetID = pathway, title = pathway) 
+})
+
+# -- Arrange with labels as a multi-panel plot
+top_pathway_plot <-ggpubr::ggarrange(plotlist = lapply(top_pathway_plots, gglistGrob), labels = "AUTO")
+
+# -- Save all the gsea plots as pdf
+# pdf(file = paste0(Pathway, "top_pathway_plot.pdf"), height = 14, width = 12)
+#dev.off()
+
+# -- Unable to repeat with under-expressed pathways - All overexpressed pathways
+
+```
