@@ -13,7 +13,7 @@ editor_options:
 ---
 ### Install and load libraries
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 ```
 
 ```{r}
@@ -94,9 +94,10 @@ library(msigdb)
 library(aplot)
 
 #set output directories
-# DE_results <- dir.create(paste0(getwd(), "/DESeq2"))
-#Pathway <- dir.create(paste0(getwd(), "/Pathway_analysis"))
-
+# rm(list = ls())
+# DE_results <- paste0(getwd(), "/DESeq2/")
+# Pathway <- paste0(getwd(), "/Pathway_analysis/")
+# QC <- paste0(getwd(), "/DESeq2/QC/")
 ```
 
 ### Import data and perform DESeq analysis
@@ -133,11 +134,13 @@ res <- results(dds)
 plotMA(res) #MA plot before
 lfc_res <- lfcShrink(dds = dds, res = res, type = "normal", coef = 2) #coef is the comparison of interest
 
+# pdf(file = paste0(QC, "lfc_shrink.pdf"), height =5, width = 12)
 par(mfrow = c(1,2))
 DESeq2::plotMA(res, 
   colLine = "red",  ylim= c(-8, 8), main = "Original")
 DESeq2::plotMA(lfc_res, 
   colLine = "red",  ylim= c(-8, 8), main = "lfcShrink")
+# dev.off()
 ```
 
 ### Perform PCA plot and sample correlation heatmap
@@ -146,8 +149,9 @@ DESeq2::plotMA(lfc_res,
 
 #Log transformation and PCA plot
 rld <- rlog(dds)
+# pdf(file = paste0(QC, "PCA.pdf"), height = 2, width = 8)
 plotPCA(rld, intgroup = "condition") + coord_fixed(ratio = 2)
-
+# dev.off()
 
 # Sample correlation matrix heatmap
 # Extract the matrix of transformed normalized counts from the vsd_data object using the assay() function and save as vsd_mat_data.
@@ -157,7 +161,11 @@ rld_mat_data <- assay(rld)
 rld_cor_data <- cor(rld_mat_data)
 
 my_colors <- c("blue", "white", "red") #Define colors for the heatmap
+
+#Sample correlation heatmap
+# pdf(file = paste0(QC, "Cor_heatmap.pdf"), height = 4, width = 6)
 Heatmap(rld_cor_data, name = "r coeff.", show_heatmap_legend = TRUE, top_annotation = HeatmapAnnotation(Condition = rse$condition))
+# dev.off()
 
 ```
 
@@ -168,8 +176,8 @@ Heatmap(rld_cor_data, name = "r coeff.", show_heatmap_legend = TRUE, top_annotat
 #Use the results from lfcShrink for all downstream analysis --lfc_res
 res_all <- as.data.frame(na.omit(lfc_res)) %>% distinct() 
 
-#save the original DGE list with ensembl ids only
-#write.csv(res_all, file = paste0(DE_results,"DEgenes-all_ensembl.csv"))
+# save the original DGE list with ensembl ids only
+# write.csv(res_all, file = paste0(DE_results,"DEgenes-all_ensembl.csv"))
 
 #Remove version # from ensembl id then annotate list with gene symbols and save it 
 rownames(res_all) <- gsub("\\.\\d+$", "", rownames(res_all))
@@ -180,7 +188,8 @@ res_all <- res_all %>%
 ```
 
 ```{r}
-#Volcano plot
+#Volcano plot and save
+# pdf(file = paste0(DE_results, "Volcano.pdf"), height = 6, width = 8)
 EnhancedVolcano( res_all, lab = res_all$symbol, 
                  x = 'log2FoldChange', y = 'padj', xlab = "Log2FC", ylab = "-log10(padj)",
                  xlim = c(-8, 8), title = "", # Centered title
@@ -188,7 +197,7 @@ EnhancedVolcano( res_all, lab = res_all$symbol,
                 caption = NULL, 
                  pCutoff = 0.01, FCcutoff = 2, pointSize = 2.0, titleLabSize = 16,
                  labSize = 3.0,  legendPosition = "right", legendLabSize = 12, axisLabSize = 12) + labs(title = 'shEF1 vs shCtrl') + theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(color = "black"), axis.text.y = element_text(color = "black"))  # Remove the "total = ..." caption
- 
+# dev.off()
 ```
 
 ### Filter significant genes, perform heatmap of top up and down DE genes
@@ -210,7 +219,7 @@ DT::datatable(res_sig, class = 'cell-border stripe', options = list(autoWidth = 
   DT::formatRound(columns = c(1,2,3,4), digits = 3) %>% # Round specific columns
   DT::formatSignif(columns = c(5,6), digits = 3) # Use significant digits for other columns
 
-#write.csv(res_sig, file = paste0(DE_results,"DEgenes-sig.csv"))
+# write.csv(res_sig, file = paste0(DE_results,"DEgenes-sig.csv")) #Save filtered significant DE genes
 
 #Up and down gene list
 res_up <- res_sig %>%
@@ -241,8 +250,10 @@ counts.z <- t(apply(norm_counts_sig, 1, scale))
 colnames(counts.z) <- rse$condition
 
 #Perform heatmap of top 10 up and down genes
+# pdf(file = paste0(DE_results, "DE_heatmap.pdf"), height = 6, width = 4)
 Heatmap(counts.z, cluster_rows = T, cluster_columns = T, column_labels = colnames(counts.z),
         name = "Z-score", row_labels = top_genes[rownames(counts.z),]$symbol)
+# dev.off()
 ```
 
 ### ORA and GSEA analysis using Clusterprofiler
@@ -267,14 +278,14 @@ edf_u <- as.data.frame(egmt_u)
 DT::datatable(edf_u, class = 'cell-border stripe', options = list(autoWidth = TRUE)) %>%
   DT::formatRound(columns = c(4,5,6,7), digits = 3) %>% # Round specific columns
   DT::formatSignif(columns = c(8,9,10), digits = 3) # Use significant digits for other columns
-#write.csv(edf_u, file = paste0(Pathway, "KEGG_up_enrichr.csv"))
+# write.csv(edf_u, file = paste0(Pathway, "KEGG_up_enricher.csv"))
 
 # Plot results with clusterProfiler and save as pdf 
 # pdf(file = paste0(Pathway, "dot_up.pdf"), height = 8, width = 8)
 dot_u <- enrichplot::dotplot(egmt_u)
 # print(dot_u)
 # dev.off()
-# 
+
 # pdf(file = paste0(Pathway, "bar_up.pdf"), height = 6, width = 8)
 bar_u <- barplot(egmt_u)
 # print(bar_u)
@@ -288,8 +299,11 @@ print(bar_u)
 egmt_d <- enricher(gene = dn_genes,
                  TERM2GENE = gene_sets)
 edf_d <- as.data.frame(egmt_d)
-datatable(edf_d, class = 'cell-border stripe', options = list(autoWidth = TRUE))
-#write.csv(edf_d, file = paste0(Pathway, "KEGG_down_enrichr.csv"))
+datatable(edf_d, class = 'cell-border stripe', options = list(autoWidth = TRUE)) %>%
+  DT::formatRound(columns = c(5,6,7), digits = 3) %>% # Round specific columns
+  DT::formatSignif(columns = c(8,9,10), digits = 3) # Use significant digits for other columns
+
+# write.csv(edf_d, file = paste0(Pathway, "KEGG_down_enricher.csv"))
 
 # Plot results with clusterProfiler and save results
 # pdf(file = paste0(Pathway, "dot_down.pdf"), height = 8, width = 8)
@@ -297,7 +311,7 @@ dot_d <- enrichplot::dotplot(egmt_d)
 # print(dot_d)
 # dev.off()
 # 
-# pdf(file = paste0(Pathway, "bar_down.pdf"), height = 6, width = 8)
+# pdf(file = paste0(Pathway, "bar_down.pdf"), height = 4, width = 8)
 bar_d <- barplot(egmt_d)
 # print(bar_d)
 # dev.off()
@@ -323,7 +337,10 @@ res_sig2<- res_sig2 %>%
 res_sig2<- res_sig2 %>%
   filter(! is.na(gsea_metric)) %>%
   arrange(desc(gsea_metric))
-View(res_sig2)
+
+datatable(head(res_sig2), class = 'cell-border stripe', options = list(autoWidth = TRUE)) %>%
+  DT::formatRound(columns = c(1,2,3,4,8), digits = 3) %>% # Round specific columns
+  DT::formatSignif(columns = c(5,6), digits = 3) # Use significant digits for other columns
 
 # GSEA value histogram
 #hist(res_sig2$gsea_metric, breaks = 100)
@@ -342,21 +359,28 @@ DT::datatable(gsearesdf, class = 'cell-border stripe', options = list(autoWidth 
   DT::formatRound(columns = c(4,5), digits = 3) %>% # Round specific columns
   DT::formatSignif(columns = c(6,7,8), digits = 3) # Use significant digits for other columns
 
+# write.csv(gsearesdf, file = paste0(Pathway, "KEGG_GSEA.csv")) #Save kegg gsea analysis
+
 # Make summary plots
 enrichplot::dotplot(gseares)
 
-# Make GSEA plot for "KEGG_ECM_RECEPTOR_INTERACTION"
+# Make GSEA plot for "KEGG_ECM_RECEPTOR_INTERACTION" and save
+# pdf(file = paste0(Pathway, "KEGG_ECM_RECEPTOR_INTERACTION.pdf"), height = 4, width = 6)
 gseaplot2(gseares, geneSetID = "KEGG_ECM_RECEPTOR_INTERACTION",
          title = "KEGG_ECM_RECEPTOR_INTERACTION")
+# dev.off()
 
 # Make GSEA plot for "KEGG_FOCAL_ADHESION"
+# pdf(file = paste0(Pathway, "KEGG_FOCAL_ADHESION.pdf"), height = 4, width = 6)
 gseaplot2(gseares, geneSetID = "KEGG_FOCAL_ADHESION",
          title = "KEGG_FOCAL_ADHESION")
+# dev.off()
 
 # Make GSEA plot for "KEGG_HEMATOPOIETIC_CELL_LINEAGE"
+# pdf(file = paste0(Pathway, "KEGG_HEMATOPOIETIC_CELL_LINEAGE.pdf"), height = 4, width = 6)
 gseaplot2(gseares, geneSetID = "KEGG_HEMATOPOIETIC_CELL_LINEAGE",
          title = "KEGG_HEMATOPOIETIC_CELL_LINEAGE")
-
+# dev.off()
 
 # Make GSEA plot for top and bottom results
 # -- Get top 4 over-expressed pathways
@@ -366,15 +390,14 @@ top_pathways <- gsearesdf %>%
 
 # -- Make gseaplot for each and return as list
 top_pathway_plots <- lapply(top_pathways, function(pathway) {
-  gseaplot(gseares, geneSetID = pathway, title = pathway) 
+  gseaplot2(gseares, geneSetID = pathway, title = pathway) 
 })
 
-# -- Arrange with labels as a multi-panel plot
+# -- Arrange with labels as a multi-panel plot and save as pdf
+# pdf(file = paste0(Pathway, "top_GSEA_plots.pdf"), height = 12, width = 12)
 top_pathway_plot <-ggpubr::ggarrange(plotlist = lapply(top_pathway_plots, gglistGrob), labels = "AUTO")
-
-# -- Save all the gsea plots as pdf
-# pdf(file = paste0(Pathway, "top_pathway_plot.pdf"), height = 14, width = 12)
-#dev.off()
+#print(top_pathway_plot)
+# dev.off()
 
 # -- Unable to repeat with under-expressed pathways - All overexpressed pathways
 
