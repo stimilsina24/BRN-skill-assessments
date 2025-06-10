@@ -4,7 +4,6 @@ author: "Santosh"
 date: "`r Sys.Date()`"
 output:
     html_document:
-      self_contained: false
     theme: cerulean
     toc: true
     toc_float:
