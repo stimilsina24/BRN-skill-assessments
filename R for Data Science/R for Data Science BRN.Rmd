@@ -3,7 +3,7 @@ title: "R for Data Science-BRN Assessment"
 author: "Santosh"
 date: "`r Sys.Date()`"
 output:
-    html_document:
+  html_document:
     theme: cerulean
     toc: true
     toc_float:
@@ -14,12 +14,8 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
-  echo = TRUE,
   warning = FALSE, 
-  message = FALSE, 
-  fig.width = 5,
-  fig.height = 4,
-  dpi = 96)
+  message = FALSE)
 ```
 
 ### Install, load libraries, and create directories
@@ -114,7 +110,7 @@ gapminder_clean %>%
 ## There is a statistically significant relationship between continent and energy use
 ```
 
-###Is there a significant difference between Europe and Asia with respect to 'Imports of goods and services (% of GDP)' in the years after 1990? (stats test needed)
+### Is there a significant difference between Europe and Asia with respect to 'Imports of goods and services (% of GDP)' in the years after 1990? (stats test needed)
 ```{r}
 plotly::ggplotly(
 gapminder_clean %>%
@@ -156,7 +152,7 @@ plotly::ggplotly(
   
 ```
 
-###What country (or countries) has shown the greatest increase in 'Life expectancy at birth, total (years)' between 1962 and 2007?
+### What country (or countries) has shown the greatest increase in 'Life expectancy at birth, total (years)' between 1962 and 2007?
 ```{r}
 plotly::ggplotly(
   gapminder_clean %>%
